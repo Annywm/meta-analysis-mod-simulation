@@ -1,0 +1,171 @@
+```{r}
+library(metafor)  
+library(ggplot2)
+set.seed(536)
+#step1: Generate simulated data 
+num_studies <- 10        
+n_participants <- 300    
+missing_rate <- 0.4      
+sim_data <- list()
+for (i in 1:num_studies) {
+  treat <- rnorm(n_participants, mean = -0.8, sd = 2.0)
+  control <- rnorm(n_participants, mean = 0, sd = 2.0)
+  n_missing <- round(n_participants * missing_rate)
+  missing_indices <- sample(1:n_participants, n_missing)
+  sim_data[[i]] <- list(
+    treat_complete = treat,
+    control_complete = control,
+    missing_indices = missing_indices)}
+
+# Step2: Define the analysis function 
+analyze_meta <- function(treat_mean, treat_sd, control_mean, control_sd, n) {
+ 
+  wmd <- treat_mean - control_mean
+  se <- sqrt(treat_sd^2/n + control_sd^2/n)
+ 
+  rma(yi = wmd, sei = se, method = "REML")}
+
+# Step3: ACA 
+
+aca_data <- lapply(sim_data, function(study) {
+  treat_obs <- study$treat_complete[-study$missing_indices]
+  control_obs <- study$control_complete
+  list(
+    treat_mean = mean(treat_obs),
+    treat_sd = sd(treat_obs),
+    control_mean = mean(control_obs),
+    control_sd = sd(control_obs),
+    n = length(treat_obs))
+})
+
+aca_df <- do.call(rbind, lapply(aca_data, as.data.frame))
+meta_aca <- analyze_meta(aca_df$treat_mean, aca_df$treat_sd, 
+                         aca_df$control_mean, aca_df$control_sd, aca_df$n)
+# Step4: Sensitivity Analysis
+
+adjust_missing <- function(study, imdom_mean, imdom_sd, group = "treat") {
+  delta <- rnorm(length(study$missing_indices), mean = imdom_mean, sd = imdom_sd)
+  if (group == "treat") {
+    adjusted <- study$treat_complete
+    adjusted[study$missing_indices] <- adjusted[study$missing_indices] + delta
+  } else {
+    adjusted <- study$control_complete
+    adjusted[study$missing_indices] <- adjusted[study$missing_indices] + delta
+  }
+  adjusted
+}
+
+# Sensitivity Analysis I: IMDOM ~ N(0, 0.5^2) (for both intervention group and control group）
+sens1_data <- lapply(sim_data, function(study) {
+  treat_adj <- adjust_missing(study, imdom_mean = 0, imdom_sd = 0.5, group = "treat")
+  control_adj <- adjust_missing(study, imdom_mean = 0, imdom_sd = 0.5, group = "control")
+  list(
+    treat_mean = mean(treat_adj),
+    treat_sd = sd(treat_adj),
+    control_mean = mean(control_adj),
+    control_sd = sd(control_adj),
+    n = n_participants  )})
+# Sensitivity Analysis II: intervention group: IMDOM ~ N(0.5, 1.5^2);control group:IMDOM ~ N(0, 1.5^2)
+sens2_data <- lapply(sim_data, function(study) {
+  treat_adj <- adjust_missing(study, imdom_mean = 0.5, imdom_sd = 1.5, group = "treat")
+  control_adj <- adjust_missing(study, imdom_mean = 0, imdom_sd = 1.5, group = "control")
+  list(
+    treat_mean = mean(treat_adj),
+    treat_sd = sd(treat_adj),
+    control_mean = mean(control_adj),
+    control_sd = sd(control_adj),
+    n = n_participants)
+})
+# Sensitivity Analysis III: intervention group: IMDOM ~ N(0, 1.5^2);control group:IMDOM ~ N(0.5, 1.5^2)
+sens3_data <- lapply(sim_data, function(study) {
+  treat_adj <- adjust_missing(study, imdom_mean = 0, imdom_sd = 1.5, group = "treat")
+  control_adj <- adjust_missing(study, imdom_mean = 0.5, imdom_sd = 1.5, group = "control")
+  list(
+    treat_mean = mean(treat_adj),
+    treat_sd = sd(treat_adj),
+    control_mean = mean(control_adj),
+    control_sd = sd(control_adj),
+    n = n_participants
+  )
+})
+
+meta_sens1 <- analyze_meta(
+  sapply(sens1_data, `[[`, "treat_mean"), 
+  sapply(sens1_data, `[[`, "treat_sd"), 
+  sapply(sens1_data, `[[`, "control_mean"), 
+  sapply(sens1_data, `[[`, "control_sd"), 
+  sapply(sens1_data, `[[`, "n"))
+meta_sens2 <- analyze_meta(
+  sapply(sens2_data, `[[`, "treat_mean"), 
+  sapply(sens2_data, `[[`, "treat_sd"), 
+  sapply(sens2_data, `[[`, "control_mean"), 
+  sapply(sens2_data, `[[`, "control_sd"), 
+  sapply(sens2_data, `[[`, "n"))
+meta_sens3 <- analyze_meta(
+  sapply(sens3_data, `[[`, "treat_mean"), 
+  sapply(sens3_data, `[[`, "treat_sd"), 
+  sapply(sens3_data, `[[`, "control_mean"), 
+  sapply(sens3_data, `[[`, "control_sd"), 
+  sapply(sens3_data, `[[`, "n"))
+
+
+
+cat("*** ACA Results ***\n")
+print(meta_aca)
+cat("\n*** Sensitivity I (IMDOM=0±0.5) ***\n")
+print(meta_sens1)
+cat("\n*** Sensitivity II (Intervention IMDOM=0.5±1.5) ***\n")
+print(meta_sens2)
+cat("\n*** Sensitivity III (Control IMDOM=0.5±1.5) ***\n")
+print(meta_sens3)
+```
+
+
+```{r}
+library(ggplot2)
+# Forest Plot for ACA and sensitivity analysis
+p1<-forest(meta_aca, slab = paste("Study", 1:length(meta_aca$yi)),
+       xlab = "Effect Size (WMD)",
+       main = "Forest Plot: Complete Case Analysis (ACA)")
+
+p2<-forest(meta_sens1, slab = paste("Study", 1:length(meta_sens1$yi)),
+       xlab = "Effect Size (WMD)",
+       main = "Forest Plot: Sensitivity Analysis I (IMDOM=0±0.5)")
+
+
+p3<-forest(meta_sens2, slab = paste("Study", 1:length(meta_sens2$yi)),
+       xlab = "Effect Size (WMD)",
+       main = "Forest Plot: Sensitivity Analysis II (Intervention IMDOM=0.5±1.5)")
+
+
+p4<-forest(meta_sens3, slab = paste("Study", 1:length(meta_sens3$yi)),
+       xlab = "Effect Size (WMD)",
+       main = "Forest Plot: Sensitivity Analysis III (Control IMDOM=0.5±1.5)")
+
+ggplot(meta_results, aes(x = Analysis, y = Estimate, color = Analysis)) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = CI_Lower, ymax = CI_Upper), width = 0.2, size = 1) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray40") +
+  coord_flip() +
+  labs(
+    title = "Comparison of Meta-Analysis Results",
+    x = NULL,
+    y = "Effect Size (WMD)"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_line(color = "gray80"),
+    legend.position = "none",
+    plot.title = element_text(hjust = 0.5)  
+  ) +
+  scale_color_manual(values = c(
+    "ACA"     = "#1f77b4",
+    "Sens I"  = "#ff7f0e",
+    "Sens II" = "#2ca02c",
+    "Sens III"= "#FF69B4"
+  ))
+
+```
+
